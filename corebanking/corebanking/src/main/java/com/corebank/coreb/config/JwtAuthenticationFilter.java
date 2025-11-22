@@ -2,10 +2,14 @@ package com.corebank.coreb.config;
 
 import com.corebank.coreb.service.StaffUserService;
 import com.corebank.coreb.util.JwtUtil;
+
+import io.jsonwebtoken.ExpiredJwtException;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
@@ -25,13 +29,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.staffUserService = staffUserService;
     }
 
-    // ✅ Define which URLs to skip filtering
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
-        return path.equals("/api/auth/login") 
-                || path.equals("/api/staff/create") 
-                || path.equals("/api/staff"); // for initial admin creation
+        return path.equals("/api/auth/login")
+                || path.equals("/api/auth/refresh")   // 🔥 IMPORTANT FOR REFRESH FLOW
+                || path.equals("/api/staff/create")
+                || path.equals("/api/staff");
     }
 
     @Override
@@ -52,25 +56,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             username = jwtUtil.extractUsername(token);
+        } catch (ExpiredJwtException e) {
+            // Token expired → let frontend refresh it
+            filterChain.doFilter(request, response);
+            return;
         } catch (Exception e) {
-            // ⚠️ Catch malformed/expired JWT
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.getWriter().write("Invalid or expired JWT token: " + e.getMessage());
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.getWriter().write("Invalid token.");
             return;
         }
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+
             var userDetails = staffUserService.loadUserByUsername(username);
 
-            if (jwtUtil.validateToken(token)) {
+            if (jwtUtil.validateToken(token, userDetails)) {
                 UsernamePasswordAuthenticationToken authToken =
                         new UsernamePasswordAuthenticationToken(
-                                userDetails,
-                                null,
-                                userDetails.getAuthorities()
+                                userDetails, null, userDetails.getAuthorities()
                         );
+
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
+
+                System.out.println("✅ Authenticated: " + username);
             }
         }
 

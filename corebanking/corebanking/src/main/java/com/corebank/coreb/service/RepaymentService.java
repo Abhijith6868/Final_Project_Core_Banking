@@ -1,11 +1,12 @@
 package com.corebank.coreb.service;
 
+import com.corebank.coreb.dto.RepaymentReportDTO;
 import com.corebank.coreb.entity.Loan;
 import com.corebank.coreb.entity.Repayment;
 import com.corebank.coreb.repository.LoanRepository;
 import com.corebank.coreb.repository.RepaymentRepository;
 import jakarta.transaction.Transactional;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -16,78 +17,92 @@ import java.util.Optional;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class RepaymentService {
 
-    @Autowired
-    private RepaymentRepository repaymentRepository;
+    private final RepaymentRepository repaymentRepository;
+    private final LoanRepository loanRepository;
+    private final SystemDateService systemDateService;
 
-    @Autowired
-    private LoanRepository loanRepository;
+    // Inject new modern PDF service
+    private final PdfReportService pdfReportService;
+
+    // Status constants
+    private static final String STATUS_UNPAID = "UNPAID";
+    private static final String STATUS_PARTIAL = "PARTIAL";
+    private static final String STATUS_PAID = "PAID";
+    private static final String STATUS_CLOSED = "CLOSED";
 
     // --------------------
-    // Save Repayment (manual insert, if needed)
+    // Save Repayment
     // --------------------
     public Repayment saveRepayment(Repayment repayment) {
-        if (repayment.getStatus() == null) {
-            repayment.setStatus("UNPAID");
-        }
-        if (repayment.getAmountPaid() == null) {
-            repayment.setAmountPaid(BigDecimal.ZERO);
-        }
+        if (repayment.getStatus() == null) repayment.setStatus(STATUS_UNPAID);
+        if (repayment.getAmountPaid() == null) repayment.setAmountPaid(BigDecimal.ZERO);
+
         if (repayment.getRemainingPrincipal() == null && repayment.getLoan() != null) {
             repayment.setRemainingPrincipal(repayment.getLoan().getBalancePrincipal());
         }
+
+        if (repayment.getPaymentDate() == null) {
+            repayment.setPaymentDate(systemDateService.getSystemDate());
+        }
+
         return repaymentRepository.save(repayment);
     }
 
     // --------------------
-    // Process Payment (Partial / Full)
+    // Process Payment
     // --------------------
     public Repayment processPayment(Long repaymentId, BigDecimal amountPaid) {
+
         Repayment repayment = repaymentRepository.findById(repaymentId)
                 .orElseThrow(() -> new RuntimeException("Repayment not found"));
 
         Loan loan = repayment.getLoan();
-        BigDecimal currentBalance = loan.getBalancePrincipal();
+        if (loan == null || loan.getInterestRate() == null || loan.getBalancePrincipal() == null) {
+            throw new RuntimeException("Loan data missing for repayment");
+        }
 
-        // Calculate dynamic interest for this period
+        BigDecimal currentBalance = loan.getBalancePrincipal();
+        LocalDate systemDate = systemDateService.getSystemDate();
+
+        // Calculate monthly interest
         BigDecimal monthlyRate = loan.getInterestRate()
                 .divide(BigDecimal.valueOf(12 * 100), 10, RoundingMode.HALF_UP);
-        BigDecimal interestDue = currentBalance.multiply(monthlyRate).setScale(2, RoundingMode.HALF_UP);
 
-        // Split payment into interest and principal
+        BigDecimal interestDue = currentBalance.multiply(monthlyRate).setScale(2, RoundingMode.HALF_UP);
         BigDecimal interestPaid = amountPaid.min(interestDue);
         BigDecimal principalPaid = amountPaid.subtract(interestPaid).max(BigDecimal.ZERO);
 
-        // Update repayment
-        repayment.setAmountPaid(amountPaid);
+        repayment.setAmountPaid(amountPaid.setScale(2, RoundingMode.HALF_UP));
         repayment.setInterestPaid(interestPaid);
         repayment.setPrincipalPaid(principalPaid);
         repayment.setOutstandingInterest(interestDue.subtract(interestPaid).max(BigDecimal.ZERO));
         repayment.setRemainingPrincipal(currentBalance.subtract(principalPaid).max(BigDecimal.ZERO));
-        repayment.setPaymentDate(LocalDate.now());
+        repayment.setPaymentDate(systemDate);
 
-        // Update repayment status
+        // Status update
         if (amountPaid.compareTo(repayment.getTotalDue()) >= 0) {
-            repayment.setStatus("PAID");
+            repayment.setStatus(STATUS_PAID);
         } else if (amountPaid.compareTo(BigDecimal.ZERO) > 0) {
-            repayment.setStatus("PARTIAL");
+            repayment.setStatus(STATUS_PARTIAL);
         } else {
-            repayment.setStatus("UNPAID");
+            repayment.setStatus(STATUS_UNPAID);
         }
 
-        // Update loan balance and status
-        loan.setBalancePrincipal(repayment.getRemainingPrincipal());
+        // Update Loan
+        loan.setBalancePrincipal(repayment.getRemainingPrincipal().max(BigDecimal.ZERO));
         if (loan.getBalancePrincipal().compareTo(BigDecimal.ZERO) == 0) {
-            loan.setStatus("CLOSED");
+            loan.setStatus(STATUS_CLOSED);
         }
-        loanRepository.save(loan);
 
+        loanRepository.save(loan);
         return repaymentRepository.save(repayment);
     }
 
     // --------------------
-    // Update Repayment (manual updates, e.g., admin corrections)
+    // Update Repayment
     // --------------------
     public Repayment updateRepayment(Repayment repayment) {
         Repayment existing = repaymentRepository.findById(repayment.getRepaymentId())
@@ -103,7 +118,7 @@ public class RepaymentService {
         existing.setOutstandingInterest(repayment.getOutstandingInterest());
         existing.setRateOfInterest(repayment.getRateOfInterest());
         existing.setStatus(repayment.getStatus());
-        existing.setPaymentDate(repayment.getPaymentDate());
+        existing.setPaymentDate(systemDateService.getSystemDate());
         existing.setReceiptNumber(repayment.getReceiptNumber());
         existing.setBillingDone(repayment.getBillingDone());
 
@@ -111,45 +126,67 @@ public class RepaymentService {
     }
 
     // --------------------
-    // Get Repayment by ID
+    // Getters
     // --------------------
     public Optional<Repayment> getRepaymentById(Long repaymentId) {
         return repaymentRepository.findById(repaymentId);
     }
 
-    // --------------------
-    // Get All Repayments
-    // --------------------
     public List<Repayment> getAllRepayments() {
         return repaymentRepository.findAll();
     }
 
-    // --------------------
-    // Get Repayments by Loan ID
-    // --------------------
     public List<Repayment> getRepaymentsByLoan(Long loanId) {
         return repaymentRepository.findByLoan_LoanId(loanId);
     }
 
     // --------------------
-    // Get Repayments by Customer ID
-    // --------------------
-    public List<Repayment> getRepaymentsByCustomer(Long customerId) {
-        return repaymentRepository.findByCustomer_CustomerId(customerId);
-    }
-
-    // --------------------
-    // Delete Repayment (if not yet paid)
+    // Delete Repayment
     // --------------------
     public boolean deleteRepayment(Long repaymentId) {
         Repayment repayment = repaymentRepository.findById(repaymentId)
                 .orElseThrow(() -> new RuntimeException("Repayment not found"));
 
-        if ("PAID".equalsIgnoreCase(repayment.getStatus())) {
-            return false; // Prevent deletion of paid EMI
+        if (STATUS_PAID.equalsIgnoreCase(repayment.getStatus())) {
+            return false;
         }
-
         repaymentRepository.delete(repayment);
         return true;
+    }
+
+    // --------------------
+    // Generate Report (DATA ONLY)
+    // --------------------
+    public List<RepaymentReportDTO> generateReport(Long loanId, LocalDate startDate, LocalDate endDate) {
+
+        List<Repayment> repayments;
+
+        if (loanId != null) {
+            repayments = repaymentRepository.findByLoan_LoanId(loanId);
+        } else if (startDate != null && endDate != null) {
+            repayments = repaymentRepository.findByPaymentDateBetween(startDate, endDate);
+        } else {
+            repayments = repaymentRepository.findAll();
+        }
+
+        return repayments.stream().map(r -> new RepaymentReportDTO(
+                r.getLoan().getLoanId(),
+                r.getDueDate(),
+                r.getPaymentDate(),
+                r.getAmountPaid(),
+                r.getRateOfInterest(),
+                r.getRemainingPrincipal(),
+                r.getOutstandingInterest()
+        )).toList();
+    }
+
+    // --------------------
+    // Modern PDF Export
+    // --------------------
+    public byte[] exportPdf(Long loanId, LocalDate startDate, LocalDate endDate, String generatedBy) {
+
+        List<RepaymentReportDTO> reportData = generateReport(loanId, startDate, endDate);
+
+        return pdfReportService.generatePdfReportModernBanking(reportData, generatedBy);
     }
 }

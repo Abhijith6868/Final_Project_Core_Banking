@@ -34,23 +34,40 @@ public class LoanService {
     @Autowired
     private CollateralRepository collateralRepository;
 
+    @Autowired
+    private SystemDateRepository systemDateRepository;
+
     // --------------------
-    // Create Loan
+    // Get current system date
+    // --------------------
+    private LocalDate getCurrentSystemDate() {
+        return systemDateRepository.findTopByOrderByIdDesc()
+                .map(SystemDate::getCurrentDate)
+                .orElseThrow(() -> new RuntimeException("System date not initialized"));
+    }
+
+    // --------------------
+    // Create Loan (Pending – No Start/Maturity Date Yet)
     // --------------------
     public LoanDTO saveLoan(LoanDTO loanDTO) {
+        if (loanDTO.getStartDate() != null) {
+            throw new IllegalArgumentException("Start date should not be set before loan approval");
+        }
+
         Loan loan = toEntity(loanDTO);
 
         loan.setStatus("Pending");
-        loan.setMaturityDate(loan.getStartDate().plusMonths(loan.getTenureMonths()));
-        loan.setBalancePrincipal(loan.getPrincipal()); // Initialize remaining principal
+        loan.setStartDate(null);
+        loan.setMaturityDate(null);
+        loan.setBalancePrincipal(loan.getPrincipal());
 
-        // Save loan first to generate ID
         Loan savedLoan = loanRepository.save(loan);
-
         return toDTO(savedLoan);
     }
 
-    
+    // --------------------
+    // Approve Loan (Sets Start Date & Generates Repayments)
+    // --------------------
     public LoanDTO approveLoan(Long loanId) {
         Loan loan = loanRepository.findById(loanId)
                 .orElseThrow(() -> new RuntimeException("Loan not found"));
@@ -59,12 +76,15 @@ public class LoanService {
             throw new RuntimeException("Only pending loans can be approved");
         }
 
+        LocalDate startDate = getCurrentSystemDate();
+        loan.setStartDate(startDate);
+        loan.setMaturityDate(startDate.plusMonths(loan.getTenureMonths()));
         loan.setStatus("Active");
-        loan.setBalancePrincipal(loan.getPrincipal()); // Ensure balancePrincipal is correct
+        loan.setBalancePrincipal(loan.getPrincipal());
+
         Loan approvedLoan = loanRepository.save(loan);
 
         generateRepayments(approvedLoan);
-
         return toDTO(approvedLoan);
     }
 
@@ -78,11 +98,9 @@ public class LoanService {
         existingLoan.setPrincipal(loanDTO.getPrincipal());
         existingLoan.setInterestRate(loanDTO.getInterestRate());
         existingLoan.setTenureMonths(loanDTO.getTenureMonths());
-        existingLoan.setStartDate(loanDTO.getStartDate());
-        existingLoan.setMaturityDate(loanDTO.getStartDate().plusMonths(loanDTO.getTenureMonths()));
         existingLoan.setLoanType(loanDTO.getLoanType());
         existingLoan.setStatus(loanDTO.getStatus());
-        existingLoan.setBalancePrincipal(loanDTO.getPrincipal()); // Update balance if principal changes
+        existingLoan.setBalancePrincipal(loanDTO.getPrincipal());
 
         if (loanDTO.getCollateralId() != null) {
             Collateral collateral = collateralRepository.findById(loanDTO.getCollateralId())
@@ -118,7 +136,7 @@ public class LoanService {
                 .map(this::toDTO)
                 .collect(Collectors.toList());
     }
-    
+
     // --------------------
     // Deactivate Loan
     // --------------------
@@ -150,7 +168,7 @@ public class LoanService {
     }
 
     // --------------------
-    // Generate Repayment Schedule (Dynamic Interest & Principal)
+    // Generate Repayment Schedule (Post Approval)
     // --------------------
     private void generateRepayments(Loan loan) {
         int tenure = loan.getTenureMonths();
@@ -160,7 +178,7 @@ public class LoanService {
         BigDecimal monthlyRate = loan.getInterestRate()
                 .divide(BigDecimal.valueOf(12 * 100), 10, RoundingMode.HALF_UP);
 
-        LocalDate startDate = loan.getStartDate();
+        LocalDate startDate = loan.getStartDate(); // ✅ use actual approval start date
 
         for (int i = 1; i <= tenure; i++) {
             Repayment repayment = new Repayment();
@@ -186,13 +204,12 @@ public class LoanService {
             repayment.setBillingDone(false);
 
             repaymentRepository.save(repayment);
-
             remainingBalance = remainingBalance.subtract(principalDue);
         }
     }
 
     // --------------------
-    // DTO ↔ Entity conversion
+    // DTO ↔ Entity Conversion
     // --------------------
     private LoanDTO toDTO(Loan loan) {
         LoanDTO dto = new LoanDTO();
@@ -228,10 +245,8 @@ public class LoanService {
         loan.setPrincipal(dto.getPrincipal());
         loan.setInterestRate(dto.getInterestRate());
         loan.setTenureMonths(dto.getTenureMonths());
-        loan.setStartDate(dto.getStartDate());
-        loan.setMaturityDate(dto.getMaturityDate());
         loan.setStatus(dto.getStatus());
-        loan.setBalancePrincipal(dto.getPrincipal()); // Initialize balancePrincipal
+        loan.setBalancePrincipal(dto.getPrincipal());
 
         Customer customer = customerRepository.findById(dto.getCustomerId())
                 .orElseThrow(() -> new RuntimeException("Customer not found"));

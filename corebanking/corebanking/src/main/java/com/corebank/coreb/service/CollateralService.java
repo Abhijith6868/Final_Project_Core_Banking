@@ -4,14 +4,17 @@ import com.corebank.coreb.dto.CollateralDTO;
 import com.corebank.coreb.entity.Collateral;
 import com.corebank.coreb.entity.Customer;
 import com.corebank.coreb.entity.Loan;
+import com.corebank.coreb.entity.SystemDate;
 import com.corebank.coreb.repository.CollateralRepository;
 import com.corebank.coreb.repository.CustomerRepository;
 import com.corebank.coreb.repository.LoanRepository;
+import com.corebank.coreb.repository.SystemDateRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -28,6 +31,20 @@ public class CollateralService {
 
     @Autowired
     private CustomerRepository customerRepository;
+
+    @Autowired
+    private SystemDateRepository systemDateRepository;
+
+    // --------------------
+    // Get Centralized System Date
+    // --------------------
+    private LocalDate getSystemDate() {
+        return systemDateRepository.findAll()
+                .stream()
+                .findFirst()
+                .map(SystemDate::getCurrentDate)
+                .orElse(LocalDate.now());
+    }
 
     // --------------------
     // Create Collateral
@@ -48,74 +65,59 @@ public class CollateralService {
             collateral.setStatus("Active");
         }
 
+        // ✅ Use centralized system date for pledged date if not provided
+        if (collateral.getPledgedDate() == null) {
+            collateral.setPledgedDate(getSystemDate());
+        }
+
         Collateral saved = collateralRepository.save(collateral);
 
         // --------------------
         // Reduce loan interest by 1% if collateral is added
         // --------------------
-        if (loan != null) {
-            BigDecimal currentRate = loan.getInterestRate();
-            BigDecimal newRate = currentRate.subtract(BigDecimal.valueOf(1.0));
-            loan.setInterestRate(newRate.max(BigDecimal.ZERO)); // prevent negative rate
-            loanRepository.save(loan);
-        }
+        BigDecimal currentRate = loan.getInterestRate();
+        BigDecimal newRate = currentRate.subtract(BigDecimal.valueOf(1.0));
+        loan.setInterestRate(newRate.max(BigDecimal.ZERO)); // prevent negative rate
+        loanRepository.save(loan);
 
         return mapToDTO(saved);
     }
 
- // --------------------
- // Update Collateral
- // --------------------
- public CollateralDTO updateCollateral(Long collateralId, CollateralDTO collateralDTO) {
-     Collateral existingCollateral = collateralRepository.findById(collateralId)
-             .orElseThrow(() -> new RuntimeException("Collateral not found"));
+    // --------------------
+    // Update Collateral
+    // --------------------
+    public CollateralDTO updateCollateral(Long collateralId, CollateralDTO collateralDTO) {
+        Collateral existingCollateral = collateralRepository.findById(collateralId)
+                .orElseThrow(() -> new RuntimeException("Collateral not found"));
 
-     // --------------------
-     // Prevent changing the loan
-     // --------------------
-     if (collateralDTO.getLoanId() != null &&
-         !existingCollateral.getLoan().getLoanId().equals(collateralDTO.getLoanId())) {
-         throw new RuntimeException("Cannot change the loan of an existing collateral");
-     }
-     
-  // Prevent changing the customer
-     // --------------------
-     if (!existingCollateral.getCustomer().getCustomerId().equals(collateralDTO.getCustomerId())) {
-         throw new RuntimeException("Cannot change the customer of an existing collateral");
-     }
-     
-     // --------------------
-     // Map other fields
-     // --------------------
-     mapToEntity(collateralDTO, existingCollateral);
+        // Prevent changing the loan
+        if (collateralDTO.getLoanId() != null &&
+            !existingCollateral.getLoan().getLoanId().equals(collateralDTO.getLoanId())) {
+            throw new RuntimeException("Cannot change the loan of an existing collateral");
+        }
 
-     // --------------------
-     // Update customer if provided
-     // --------------------
-     if (collateralDTO.getCustomerId() != null) {
-         Customer customer = customerRepository.findById(collateralDTO.getCustomerId())
-                 .orElseThrow(() -> new RuntimeException("Customer not found"));
-         existingCollateral.setCustomer(customer);
-     }
+        // Prevent changing the customer
+        if (!existingCollateral.getCustomer().getCustomerId().equals(collateralDTO.getCustomerId())) {
+            throw new RuntimeException("Cannot change the customer of an existing collateral");
+        }
 
-     // --------------------
-     // Ensure status is set
-     // --------------------
-     if (existingCollateral.getStatus() == null) {
-         existingCollateral.setStatus("Active");
-     }
+        // Map other fields
+        mapToEntity(collateralDTO, existingCollateral);
 
-     // --------------------
-     // Save updated collateral
-     // --------------------
-     Collateral updated = collateralRepository.save(existingCollateral);
+        // Use system date if pledgedDate is missing
+        if (existingCollateral.getPledgedDate() == null) {
+            existingCollateral.setPledgedDate(getSystemDate());
+        }
 
-     // --------------------
-     // Do NOT reduce loan interest on update
-     // --------------------
+        if (existingCollateral.getStatus() == null) {
+            existingCollateral.setStatus("Active");
+        }
 
-     return mapToDTO(updated);
- }
+        Collateral updated = collateralRepository.save(existingCollateral);
+
+        return mapToDTO(updated);
+    }
+
     // --------------------
     // Get Collateral by ID
     // --------------------

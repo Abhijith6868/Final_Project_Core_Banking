@@ -6,6 +6,7 @@ import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -17,14 +18,26 @@ public class LoanTransactionService {
     @Autowired
     private LoanTransactionRepository loanTransactionRepository;
 
+    @Autowired
+    private SystemDateService systemDateService; // ✅ Centralized system date
+
     // --------------------
     // Create new loan transaction
     // --------------------
     public LoanTransaction saveTransaction(LoanTransaction transaction) {
-        transaction.setTransactionDate(LocalDateTime.now());
-        if (transaction.getStatus() == null) {
+        // ✅ Use system date for consistency with other financial modules
+        LocalDate systemDate = systemDateService.getSystemDate();
+
+        // Convert system date to LocalDateTime (midday default)
+        transaction.setTransactionDate(systemDate.atTime(LocalDateTime.now().getHour(),
+                                                         LocalDateTime.now().getMinute(),
+                                                         LocalDateTime.now().getSecond()));
+
+        // Default status if not provided
+        if (transaction.getStatus() == null || transaction.getStatus().isBlank()) {
             transaction.setStatus("Completed");
         }
+
         return loanTransactionRepository.save(transaction);
     }
 

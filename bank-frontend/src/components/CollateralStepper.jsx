@@ -1,7 +1,11 @@
 import React from "react";
 
-export default function LoanStepper({ currentStep }) {
-  const steps = ["Cutomer Details", "Review & Submit"];
+export default function CollateralStepper({ currentStep }) {
+  const steps = [
+    "Loan & Customer Info",
+    "Collateral Details",
+    "Review & Submit",
+  ];
 
   return (
     <div className="flex items-center justify-between w-full max-w-3xl mx-auto mb-8">
@@ -32,7 +36,7 @@ export default function LoanStepper({ currentStep }) {
               {stepNumber}
             </div>
 
-            {/* Label */}
+            {/* Step Label */}
             <p
               className={`mt-2 text-sm ${
                 isActive ? "text-blue-400 font-medium" : "text-gray-600"

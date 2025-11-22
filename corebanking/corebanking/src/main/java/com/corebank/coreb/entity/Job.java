@@ -3,17 +3,14 @@ package com.corebank.coreb.entity;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
+
 
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 
 @Entity
 @Data
-@Getter
-@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "job")
@@ -21,21 +18,23 @@ public class Job {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long jobId;
-
+    private Long seqNo; // execution log id
+    
     private String jobType;
 
     private LocalDateTime startTime;
     private LocalDateTime endTime;
 
-    private String executionMode; // Manual / Automatic
-    private String status;        // Success / Failed / Partial
+    private String executionMode; 
+    private String status;
 
     @Column(columnDefinition = "TEXT")
     private String remarks;
 
-    private Long userId;          // Nullable if automatic
+    private Long userId;
     private LocalDate processedDate;
 
-    // Getters and Setters
+    @ManyToOne
+    @JoinColumn(name = "jobid") // same FK name as PK of JobMaster
+    private JobMaster jobMaster;
 }

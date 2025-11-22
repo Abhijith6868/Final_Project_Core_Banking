@@ -1,46 +1,81 @@
-// CustomerList.jsx
 // Path: src/components/CustomerList.jsx
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import { DataGrid } from "@mui/x-data-grid";
-import { Typography, TextField, Button } from "@mui/material";
+import api from "../api/api"; // ✅ use your axios instance with token interceptor
+import {
+  Button,
+  TextField,
+  Typography,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+} from "@mui/material";
+
+const API_URL = "/api/customers"; // ✅ relative path since baseURL is already set
+
+console.log("🔍 Fetching customers...");
+console.log("Token being sent:", localStorage.getItem("token"));
 
 export default function CustomerList() {
   const [customers, setCustomers] = useState([]);
   const [filteredCustomers, setFilteredCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    addressLine1: "",
+    city: "",
+    state: "",
+    zip: "",
+    kycDetails: "",
+  });
 
   useEffect(() => {
-    axios.get("http://localhost:8080/api/customers")
-      .then((response) => {
-        const rows = response.data.map((c) => ({
-          id: c.customerId,
-          customerId: c.customerId,
-          name: `${c.firstName || ""} ${c.lastName || ""}`.trim(),
-          email: c.email,
-          phone: c.phone,
-          dob: c.dob || "N/A",
-          // 👇 Split address into separate fields
-          addressLine1: c.addressLine1 || "N/A",
-          city: c.city || "N/A",
-          state: c.state || "N/A",
-          zip: c.zip || "N/A",
-          kycDetails: c.kycDetails || "N/A",
-          createdAt: c.createdAt ? new Date(c.createdAt).toLocaleString() : "N/A",
-          status: c.status || "N/A",
-          branch: c.branchName || c.branch?.name || "N/A",
-        }));
-
-        setCustomers(rows);
-        setFilteredCustomers(rows);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error fetching customers:", error);
-        setLoading(false);
-      });
+    fetchCustomers();
   }, []);
+
+  // ✅ Token automatically sent by interceptor in api.js
+  const fetchCustomers = async () => {
+    try {
+      const res = await api.get(API_URL);
+      console.log("Response status:", res.status);
+      console.log("Response data:", res.data);
+
+      const rows = res.data.map((c) => ({
+        id: c.customerId,
+        customerId: c.customerId,
+        name: `${c.firstName || ""} ${c.lastName || ""}`.trim(),
+        email: c.email,
+        phone: c.phone,
+        dob: c.dob || "N/A",
+        addressLine1: c.addressLine1 || "N/A",
+        city: c.city || "N/A",
+        state: c.state || "N/A",
+        zip: c.zip || "N/A",
+        kycDetails: c.kycDetails || "N/A",
+        createdAt: c.createdAt
+          ? new Date(c.createdAt).toLocaleString()
+          : "N/A",
+        status: c.status || "N/A",
+        branch: c.branchName || c.branch?.name || "N/A",
+      }));
+      setCustomers(rows);
+      setFilteredCustomers(rows);
+    } catch (err) {
+      console.error("Error fetching customers:", err);
+    }
+  };
 
   const handleSearch = (event) => {
     const value = event.target.value.toLowerCase();
@@ -49,132 +84,254 @@ export default function CustomerList() {
       customers.filter(
         (c) =>
           c.name.toLowerCase().includes(value) ||
-          c.email.toLowerCase().includes(value)
+          c.email.toLowerCase().includes(value) ||
+          (c.phone && c.phone.toLowerCase().includes(value))
       )
     );
   };
 
-  const handleDeleteCustomer = (id) => {
-    if (window.confirm("Are you sure you want to delete this customer?")) {
-      axios.delete(`http://localhost:8080/api/customers/${id}`)
-        .then(() => {
-          const updatedCustomers = customers.filter(c => c.id !== id);
-          setCustomers(updatedCustomers);
-          setFilteredCustomers(updatedCustomers);
-        })
-        .catch(err => console.error("Error deleting customer:", err));
+  // ✅ Token auto-attached here as well
+  const handleCreate = async () => {
+    try {
+      await api.post(API_URL, form);
+      setOpen(false);
+      fetchCustomers();
+    } catch (err) {
+      console.error(err);
     }
   };
 
-  if (loading)
-    return <Typography className="text-white text-lg">Loading customers...</Typography>;
-
-  const columns = [
-    { field: "customerId", headerName: "Customer ID", width: 120 },
-    { field: "name", headerName: "Name", width: 200 },
-    { field: "email", headerName: "Email", width: 250 },
-    { field: "phone", headerName: "Phone", width: 150 },
-    { field: "dob", headerName: "Date of Birth", width: 150 },
-
-    // 👇 Separated Address Columns
-    { field: "addressLine1", headerName: "Address Line 1", width: 220 },
-    { field: "city", headerName: "City", width: 150 },
-    { field: "state", headerName: "State", width: 150 },
-    { field: "zip", headerName: "ZIP", width: 120 },
-
-    { field: "kycDetails", headerName: "KYC Details", width: 200 },
-    { field: "createdAt", headerName: "Created At", width: 180 },
-    { field: "status", headerName: "Status", width: 120 },
-    { field: "branch", headerName: "Branch", width: 150 },
-    {
-      field: "actions",
-      headerName: "Actions",
-      width: 180,
-      sortable: false,
-      renderCell: (params) => (
-        <>
-          <Button
-            variant="contained"
-            color="primary"
-            size="small"
-            className="mr-2"
-            href={`/customers/update/${params.id}`}
-          >
-            Edit
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            size="small"
-            onClick={() => handleDeleteCustomer(params.id)}
-          >
-            Delete
-          </Button>
-        </>
-      ),
-    },
-  ];
+  // ✅ Token auto-attached for delete too
+  const handleDeleteCustomer = async (id) => {
+    if (window.confirm("Are you sure you want to delete this customer?")) {
+      try {
+        await api.delete(`${API_URL}/${id}`);
+        fetchCustomers();
+      } catch (err) {
+        console.error("Error deleting customer:", err);
+      }
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900 p-10">
-      <div className="max-w-7xl mx-auto">
-        <Typography variant="h4" className="text-white font-semibold mb-6">
-          Customer List
+    <Box
+      sx={{
+        p: 4,
+        background: "linear-gradient(to right, #7f00ff, #e100ff)",
+        minHeight: "100vh",
+      }}
+    >
+      <Paper
+        elevation={6}
+        sx={{
+          p: 4,
+          borderRadius: 4,
+          backgroundColor: "rgba(255,255,255,0.95)",
+        }}
+      >
+        <Typography
+          variant="h4"
+          sx={{
+            mb: 3,
+            fontWeight: 700,
+            textAlign: "center",
+            color: "#7f00ff",
+            letterSpacing: "1px",
+          }}
+        >
+          Customer Management
         </Typography>
 
-        {/* Search box */}
-        <div className="mb-6">
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            mb: 2,
+          }}
+        >
           <TextField
-            label="Search by Name or Email"
+            label="Search by Name, Email, or Phone"
             variant="outlined"
-            fullWidth
             value={searchText}
             onChange={handleSearch}
-            className="bg-white/10 rounded-md"
-            InputProps={{
-              className: "text-white",
-            }}
-            InputLabelProps={{
-              className: "text-white/80",
-            }}
-          />
-        </div>
-
-        {/* DataGrid card */}
-        <div className="bg-white/10 rounded-2xl p-6 shadow-2xl">
-          <DataGrid
-            rows={filteredCustomers}
-            columns={columns}
-            pageSize={10}
-            rowsPerPageOptions={[10, 25, 50]}
-            autoHeight
-            disableSelectionOnClick
             sx={{
-              "& .MuiDataGrid-root": {
-                backgroundColor: "rgba(255, 255, 255, 0.05)",
-                borderRadius: "12px",
-              },
-              "& .MuiDataGrid-cell": {
-                color: "#030a12ff",
-              },
-              "& .MuiDataGrid-columnHeaders": {
-                backgroundColor: "rgba(255, 255, 255, 0.1)",
-                color: "#070707ff",
-                fontWeight: 600,
-              },
-              "& .MuiDataGrid-footerContainer": {
-                backgroundColor: "rgba(255, 255, 255, 0.1)",
-                color: "#030303ff",
-              },
-              "& .MuiDataGrid-row:hover": {
-                backgroundColor: "rgba(255,255,255,0.1)",
-              },
-              border: 0,
-              boxShadow: "none",
+              flex: 1,
+              backgroundColor: "#f3e8ff",
+              borderRadius: 2,
+              mr: 2,
             }}
           />
-        </div>
-      </div>
-    </div>
+          <Button
+            variant="contained"
+            sx={{
+              backgroundColor: "#7f00ff",
+              "&:hover": { backgroundColor: "#9b2eff" },
+              borderRadius: 2,
+              fontWeight: 600,
+            }}
+            onClick={() => setOpen(true)}
+          >
+            + Add Customer
+          </Button>
+        </Box>
+
+        <TableContainer component={Paper} sx={{ borderRadius: 3, boxShadow: 3 }}>
+          <Table>
+            <TableHead sx={{ backgroundColor: "#f3e8ff" }}>
+              <TableRow>
+                <TableCell sx={{ fontWeight: "bold" }}>ID</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Name</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Email</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Phone</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>City</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>State</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Branch</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }} align="center">
+                  Actions
+                </TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredCustomers.map((c) => (
+                <TableRow
+                  key={c.customerId}
+                  sx={{
+                    "&:hover": { backgroundColor: "#f8f5ff" },
+                    transition: "0.2s",
+                  }}
+                >
+                  <TableCell>{c.customerId}</TableCell>
+                  <TableCell>{c.name}</TableCell>
+                  <TableCell>{c.email}</TableCell>
+                  <TableCell>{c.phone}</TableCell>
+                  <TableCell>{c.city}</TableCell>
+                  <TableCell>{c.state}</TableCell>
+                  <TableCell>
+                    <span
+                      style={{
+                        color:
+                          c.status === "ACTIVE"
+                            ? "#4caf50"
+                            : c.status === "INACTIVE"
+                            ? "#f44336"
+                            : "#9c27b0",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {c.status}
+                    </span>
+                  </TableCell>
+                  <TableCell>{c.branch}</TableCell>
+                  <TableCell align="center">
+                    <Button
+                      size="small"
+                      sx={{ color: "#7f00ff", fontWeight: 600, mr: 1 }}
+                      href={`/customers/update/${c.customerId}`}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="small"
+                      sx={{ color: "#d32f2f", fontWeight: 600 }}
+                      onClick={() => handleDeleteCustomer(c.customerId)}
+                    >
+                      Delete
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      {/* Create Customer Dialog */}
+      <Dialog open={open} onClose={() => setOpen(false)}>
+        <DialogTitle sx={{ color: "#7f00ff", fontWeight: 700 }}>
+          Add New Customer
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            margin="dense"
+            label="First Name"
+            fullWidth
+            value={form.firstName}
+            onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="Last Name"
+            fullWidth
+            value={form.lastName}
+            onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="Email"
+            fullWidth
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="Phone"
+            fullWidth
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="Address"
+            fullWidth
+            value={form.addressLine1}
+            onChange={(e) => setForm({ ...form, addressLine1: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="City"
+            fullWidth
+            value={form.city}
+            onChange={(e) => setForm({ ...form, city: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="State"
+            fullWidth
+            value={form.state}
+            onChange={(e) => setForm({ ...form, state: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="ZIP"
+            fullWidth
+            value={form.zip}
+            onChange={(e) => setForm({ ...form, zip: e.target.value })}
+          />
+          <TextField
+            margin="dense"
+            label="KYC Details"
+            fullWidth
+            value={form.kycDetails}
+            onChange={(e) =>
+              setForm({ ...form, kycDetails: e.target.value })
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            sx={{
+              backgroundColor: "#7f00ff",
+              "&:hover": { backgroundColor: "#9b2eff" },
+            }}
+            onClick={handleCreate}
+          >
+            Add
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 }

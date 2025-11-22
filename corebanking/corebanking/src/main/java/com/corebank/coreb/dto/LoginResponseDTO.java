@@ -9,6 +9,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class LoginResponseDTO {
     private String message;
-    private String username;
+    private String token;   // ✅ Correct field name
     private boolean success;
 }

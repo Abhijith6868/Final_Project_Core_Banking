@@ -1,11 +1,12 @@
 package com.corebank.coreb.service;
 
+import com.corebank.coreb.dto.AccountDTO;
 import com.corebank.coreb.entity.Account;
+import com.corebank.coreb.entity.Branch;
+import com.corebank.coreb.entity.Customer;
 import com.corebank.coreb.entity.Deposit;
-import com.corebank.coreb.repository.AccountRepository;
-import com.corebank.coreb.repository.CardRepository;
-//import com.corebank.coreb.repository.ChequeBookRepository;
-import com.corebank.coreb.repository.DepositRepository;
+import com.corebank.coreb.entity.SystemDate;
+import com.corebank.coreb.repository.*;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -24,13 +25,61 @@ public class AccountService {
     private AccountRepository accountRepository;
 
     @Autowired
-    private CardRepository cardRepository;
+    private CustomerRepository customerRepository;
 
-//    @Autowired
-//    private ChequeBookRepository chequeBookRepository;
+    @Autowired
+    private BranchRepository branchRepository;
+
+    @Autowired
+    private CardRepository cardRepository;
 
     @Autowired
     private DepositRepository depositRepository;
+
+    @Autowired
+    private SystemDateRepository systemDateRepository;
+
+    // --------------------
+    // Convert Account -> AccountDTO
+    // --------------------
+    public AccountDTO toDTO(Account account) {
+        AccountDTO dto = new AccountDTO();
+
+        dto.setAccountId(account.getAccountId());
+        dto.setAccountType(account.getAccountType());
+        dto.setBalance(account.getBalance());
+        dto.setStatus(account.getStatus());
+
+        // --- Customer ---
+        if (account.getCustomer() != null) {
+            dto.setCustomer(account.getCustomer().getCustomerId());
+            dto.setCustomerName(
+                account.getCustomer().getFirstName() + " " + account.getCustomer().getLastName()
+            );
+        }
+
+        // --- Branch ---
+        if (account.getBranch() != null) {
+            dto.setBranch(account.getBranch().getBranchId());
+            dto.setBranchName(account.getBranch().getName());
+        }
+
+        return dto;
+    }
+    
+    public Optional<Account> getAccountById(Long id) {
+        return accountRepository.findById(id);
+    }
+
+    // --------------------
+    // Get current system date
+    // --------------------
+    private LocalDate getSystemDate() {
+        return systemDateRepository.findAll().stream()
+                .findFirst()
+                .map(SystemDate::getCurrentDate)
+                .orElse(LocalDate.now());
+    }
 
     // --------------------
     // Save or update account
@@ -41,12 +90,14 @@ public class AccountService {
         return accountRepository.save(account);
     }
 
-    public Optional<Account> getAccountById(Long id) {
-        return accountRepository.findById(id);
-    }
-
-    public List<Account> getAllAccounts() {
-        return accountRepository.findAll();
+    // --------------------
+    // Get all accounts as DTOs
+    // --------------------
+    public List<AccountDTO> getAllAccounts() {
+        return accountRepository.findAll()
+                .stream()
+                .map(this::toDTO)
+                .toList();
     }
 
     // --------------------
@@ -57,9 +108,8 @@ public class AccountService {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Account not found"));
 
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0)
             throw new IllegalArgumentException("Deposit amount must be positive");
-        }
 
         account.setBalance(account.getBalance().add(amount));
 
@@ -68,7 +118,7 @@ public class AccountService {
         deposit.setCustomer(account.getCustomer());
         deposit.setPrincipalAmount(amount);
         deposit.setDepositType("DEPOSIT");
-        deposit.setStartDate(LocalDate.now());
+        deposit.setStartDate(getSystemDate());
         deposit.setStatus("ACTIVE");
 
         accountRepository.save(account);
@@ -83,12 +133,11 @@ public class AccountService {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Account not found"));
 
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0)
             throw new IllegalArgumentException("Withdrawal amount must be positive");
-        }
-        if (account.getBalance().compareTo(amount) < 0) {
+
+        if (account.getBalance().compareTo(amount) < 0)
             throw new IllegalArgumentException("Insufficient balance");
-        }
 
         account.setBalance(account.getBalance().subtract(amount));
 
@@ -97,7 +146,7 @@ public class AccountService {
         deposit.setCustomer(account.getCustomer());
         deposit.setPrincipalAmount(amount);
         deposit.setDepositType("WITHDRAWAL");
-        deposit.setStartDate(LocalDate.now());
+        deposit.setStartDate(getSystemDate());
         deposit.setStatus("ACTIVE");
 
         accountRepository.save(account);
@@ -111,7 +160,7 @@ public class AccountService {
         if (!"SAVINGS".equalsIgnoreCase(account.getAccountType()) || account.getBalance() == null) {
             return BigDecimal.ZERO;
         }
-        BigDecimal annualRate = new BigDecimal("0.05"); // 5% annual
+        BigDecimal annualRate = new BigDecimal("0.05"); // 5%
         BigDecimal monthlyRate = annualRate.divide(new BigDecimal("12"), 10, RoundingMode.HALF_UP);
         return account.getBalance().multiply(monthlyRate).setScale(2, RoundingMode.HALF_UP);
     }
@@ -135,7 +184,7 @@ public class AccountService {
         deposit.setPrincipalAmount(interest);
         deposit.setDepositType("INTEREST");
         deposit.setInterestRate(new BigDecimal("0.05"));
-        deposit.setStartDate(LocalDate.now());
+        deposit.setStartDate(getSystemDate());
         deposit.setStatus("ACTIVE");
 
         accountRepository.save(account);
@@ -143,7 +192,7 @@ public class AccountService {
     }
 
     // --------------------
-    // Soft delete account
+    // Deactivate account
     // --------------------
     @Transactional
     public boolean deactivateAccount(Long accountId) {
@@ -155,8 +204,6 @@ public class AccountService {
 
         depositRepository.deactivateDepositsByAccountId(accountId);
         cardRepository.deactivateCardsByAccountId(accountId);
-//        chequeBookRepository.deactivateChequeBooksByAccountId(accountId);
-
         return true;
     }
 
@@ -173,28 +220,24 @@ public class AccountService {
 
         depositRepository.deactivateDepositsByAccountId(accountId);
         cardRepository.deactivateCardsByAccountId(accountId);
-//        chequeBookRepository.deactivateChequeBooksByAccountId(accountId);
-
         return account;
     }
 
     // --------------------
-    // Safe delete account
+    // Safe delete
     // --------------------
     @Transactional
     public boolean safeDeleteAccount(Long accountId) {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Account not found"));
 
-        String status = account.getStatus();
-        if (!"Inactive".equalsIgnoreCase(status) && !"Closed".equalsIgnoreCase(status)) {
+        if (!"Inactive".equalsIgnoreCase(account.getStatus()) &&
+                !"Closed".equalsIgnoreCase(account.getStatus())) {
             return false;
         }
 
         depositRepository.deleteByAccountId(accountId);
         cardRepository.deleteByAccountId(accountId);
-//        chequeBookRepository.deleteByAccountId(accountId);
-
         accountRepository.delete(account);
         return true;
     }
